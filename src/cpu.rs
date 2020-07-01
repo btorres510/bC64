@@ -309,7 +309,7 @@ impl<I: Interconnect> CPU<I> {
 
             res = (res & 0xF).wrapping_add(a & 0xF0).wrapping_add(d & 0xF0);
 
-            if !(res <= 0x0F) {
+            if res > 0x0F {
                 res = (res & 0xF).wrapping_add(0x10)
             }
 
