@@ -349,8 +349,7 @@ impl<I: Interconnect> CPU<I> {
             }
             res
         } else {
-            let res = a.wrapping_sub(*d).wrapping_sub(*c);
-            res
+            a.wrapping_sub(*d).wrapping_sub(*c)
         };
 
         self.sr.set_c(result < 0x100);
@@ -646,10 +645,9 @@ mod tests {
     #[test]
     fn test_jmp_bug() {
         let bus = DummyBus::new();
-        let cpu = CPU::new(0x200, bus);
-        let mut mem = vec![0; 0x101];
-        mem[0xFF] = 0x00;
-        mem[0x00] = 0x02;
+        let mut cpu = CPU::new(0x200, bus);
+        cpu.sys.ram[0xFF] = 0x00;
+        cpu.sys.ram[0x00] = 0x02;
         assert_eq!(cpu.buggy_read16(0xFF), 0x200);
     }
 
