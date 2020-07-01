@@ -144,9 +144,17 @@ impl<I: Interconnect> CPU<I> {
         }
     }
 
-    // pub fn reset(&mut self, pc: u16) {
-    //     *self = CPU::new(pc);
-    // }
+    pub fn reset(&mut self, pc: u16) {
+        // Definitely needs refactoring
+        self.a = 0;
+        self.x = 0;
+        self.y = 0;
+        self.sp = 0xFD;
+        self.pc = pc;
+        self.sr.0 = 0x34;
+        self.cycles = 0;
+        self.intr_status = None;
+    }
 
     pub fn get_pc(&self) -> &u16 {
         &self.pc
