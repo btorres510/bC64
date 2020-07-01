@@ -49,6 +49,7 @@ fn functional_test() {
                 if *cpu.get_pc() == 0x3464 {
                     assert_eq!(*cpu.get_pc(), 0x3464);
                 } else {
+                    println!("Failure! \n State: {}", cpu.dump_state());
                     panic!("{:?}", e.to_string());
                 }
             }
