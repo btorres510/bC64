@@ -96,6 +96,7 @@ bitfield! {
     get_v, set_v: 6;
     get_n, set_n: 7;
 }
+
 pub struct CPU<I: Interconnect> {
     // Registers
     a: u8,
@@ -182,13 +183,13 @@ impl<I: Interconnect> CPU<I> {
     }
 
     fn pop(&mut self) -> u8 {
-        let ret = self.readb((self.sp as u16 | 0x100) + 1);
+        let ret = self.readb(0x100 | (self.sp.wrapping_add(1)) as u16);
         self.sp = self.sp.wrapping_add(1);
         ret
     }
 
     fn pop16(&mut self) -> u16 {
-        let ret = self.readw((self.sp as u16 | 0x100) + 1);
+        let ret = self.readw(0x100 | (self.sp.wrapping_add(1)) as u16);
         self.sp = self.sp.wrapping_add(2);
         ret
     }
@@ -216,23 +217,50 @@ impl<I: Interconnect> CPU<I> {
         self.push(stack_sr);
     }
 
+    fn extra_cycle(&mut self) {
+        type A = AddressingModes;
+        match self.instr.mode {
+            A::IndirectIndexed => {
+                if self.opcode != 0x91 {
+                    self.cycles += 1;
+                }
+            }
+            A::AbsoluteY => {
+                if self.opcode != 0x99 {
+                    self.cycles += 1;
+                }
+            }
+            A::AbsoluteX => {
+                if (self.opcode & 0x0F) != 0x0E && self.opcode != 0x9D {
+                    self.cycles += 1;
+                }
+            }
+            _ => (),
+        }
+    }
+
     // Addressing Mode data
     fn get_abs_data(&mut self, val: u8) {
         let addr = val as u16 + self.readw(self.pc + 1);
-        // TODO: Extra cycle shit
+        if self.is_different_page(self.readw(self.pc + 1), addr) {
+            self.extra_cycle();
+        }
         self.address = addr;
         self.data = self.readb(addr);
     }
 
     fn get_zp_data(&mut self, val: u8) {
-        let addr = val + self.readb(self.pc + 1);
+        let addr = val.wrapping_add(self.readb(self.pc + 1));
         self.address = addr as u16;
         self.data = self.readb(addr as u16);
     }
 
     fn get_ind_data(&mut self, val: u8, val2: u8) {
-        let ptr = val + self.readb(self.pc + 1);
+        let ptr = val.wrapping_add(self.readb(self.pc + 1));
         let addr = val2 as u16 + self.buggy_read16(ptr as u16);
+        if self.is_different_page(self.buggy_read16(ptr as u16), addr) {
+            self.extra_cycle();
+        }
         self.address = addr as u16;
         self.data = self.readb(addr as u16);
     }
@@ -372,6 +400,9 @@ impl<I: Interconnect> CPU<I> {
     /// This method returns a Result that does nothing on success, but returns
     /// an EmulatorError on failure. See the documentation for EmulatorError for more info.
     pub fn step(&mut self) -> Result<(), EmulatorError> {
+        if self.pc == 0xD9B {
+            dbg!(self.readb(0x100 | (self.sp.wrapping_add(1)) as u16));
+        }
         match self.intr_status {
             None => (),
             Some(InterruptStatus::IRQ) => self.interrupt(IRQ_VECTOR),
