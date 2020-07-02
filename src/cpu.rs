@@ -145,15 +145,14 @@ impl<I: Interconnect> CPU<I> {
         }
     }
 
-    pub fn reset(&mut self, pc: u16) {
-        // Definitely needs refactoring
+    pub fn reset(&mut self) {
         self.a = 0;
         self.x = 0;
         self.y = 0;
         self.sp = 0xFD;
-        self.pc = pc;
+        self.pc = self.readw(RES_VECTOR);
         self.sr.0 = 0x34;
-        self.cycles = 0;
+        self.cycles = 7;
         self.intr_status = None;
     }
 
@@ -202,7 +201,7 @@ impl<I: Interconnect> CPU<I> {
 
     fn push16(&mut self, val: u16) {
         self.writeb(self.sp as u16 | 0x100, (val >> 8) as u8);
-        self.writeb((self.sp as u16 | 0x100) - 1, (val & 0xFF) as u8);
+        self.writeb((self.sp.wrapping_sub(1) as u16) | 0x100, (val & 0xFF) as u8);
         self.sp = self.sp.wrapping_sub(2);
     }
 
@@ -330,54 +329,49 @@ impl<I: Interconnect> CPU<I> {
         Ok(())
     }
 
-    // All credit to https://github.com/koute/pinky
-    // I used their decimal mode implementation for ADC and SBC
-
-    fn add(&mut self) {
+    fn adc(&mut self) {
         let a = &(self.a as u16);
         let d = &(self.data as u16);
         let c = &(self.sr.get_c() as u16);
         let result = if self.sr.get_d() {
-            let mut res = (a & 0x0F).wrapping_add(d & 0x0F).wrapping_add(c & 0x0F);
+            let mut res = (*a & 0xF).wrapping_add(*d & 0xF).wrapping_add(*c);
             if res > 0x9 {
                 res = res.wrapping_add(0x6);
             }
 
-            res = (res & 0xF).wrapping_add(a & 0xF0).wrapping_add(d & 0xF0);
-
-            if res > 0x0F {
-                res = (res & 0xF).wrapping_add(0x10)
-            }
+            res = res.wrapping_add(*a & 0xF0).wrapping_add(*d & 0xF0);
 
             if (res & 0x1F0) > 0x90 {
                 res = res.wrapping_add(0x60);
             }
 
             self.sr.set_c((res & 0xFF0) > 0xF0);
+            self.sr.set_z((*a).wrapping_add(*d).wrapping_add(*c) == 0);
+            self.sr.set_n(res & 0x80 == 0x80);
             res
         } else {
-            let res = a.wrapping_add(*d).wrapping_add(*c);
+            let res = (*a).wrapping_add(*d).wrapping_add(*c);
             self.sr.set_c(res > 0xFF);
+            self.set_zn(res as u8);
             res
         };
 
-        self.set_zn(result as u8);
         self.sr
             .set_v((!(self.a ^ self.data) & (self.a ^ result as u8) & 0x80) == 0x80);
         self.a = result as u8;
     }
 
-    fn sub(&mut self) {
+    fn sbc(&mut self) {
         let a = &(self.a as u16);
         let d = &(self.data as u16);
-        let c = &(self.sr.get_c() as u16);
+        let c = &(!self.sr.get_c() as u16);
         let result = if self.sr.get_d() {
-            let mut res = (a & 0xF).wrapping_sub(*d & 0xF).wrapping_sub(*c);
+            let mut res = (*a & 0xF).wrapping_sub(*d & 0xF).wrapping_sub(*c);
             if (res & 0x10) != 0 {
                 res = ((res.wrapping_sub(0x6)) & 0xF)
-                    | ((a & 0xf0).wrapping_sub(*d & 0xf0).wrapping_sub(0x10));
+                    | ((*a & 0xF0).wrapping_sub(*d & 0xF0).wrapping_sub(0x10));
             } else {
-                res = (res & 0xf) | (a & 0xf0).wrapping_sub(*d & 0xf0);
+                res = (res & 0xF) | (*a & 0xF0).wrapping_sub(*d & 0xF0);
             }
 
             if (res & 0x100) != 0 {
@@ -385,13 +379,15 @@ impl<I: Interconnect> CPU<I> {
             }
             res
         } else {
-            a.wrapping_sub(*d).wrapping_sub(*c)
+            (*a).wrapping_sub(*d).wrapping_sub(*c)
         };
 
         self.sr.set_c(result < 0x100);
         self.set_zn(result as u8);
         self.sr
-            .set_v((!(self.a ^ self.data) & (self.a ^ result as u8) & 0x80) == 0x80);
+            .set_v(((*a ^ self.data as u16) & 0x80) != 0 && ((*a ^ result) & 0x80) != 0);
+        // self.sr
+        //     .set_v((!(self.a ^ self.data) & (self.a ^ result as u8) & 0x80) == 0x80);
         self.a = result as u8;
     }
 
@@ -400,9 +396,6 @@ impl<I: Interconnect> CPU<I> {
     /// This method returns a Result that does nothing on success, but returns
     /// an EmulatorError on failure. See the documentation for EmulatorError for more info.
     pub fn step(&mut self) -> Result<(), EmulatorError> {
-        if self.pc == 0xD9B {
-            dbg!(self.readb(0x100 | (self.sp.wrapping_add(1)) as u16));
-        }
         match self.intr_status {
             None => (),
             Some(InterruptStatus::IRQ) => self.interrupt(IRQ_VECTOR),
@@ -458,11 +451,10 @@ impl<I: Interconnect> CPU<I> {
             }
             // ROL
             0x26 | 0x2A | 0x2E | 0x36 | 0x3E => {
-                self.sr.set_c(((self.data >> 7) & 0x1) == 0x1);
-                self.data <<= 1;
-                if self.sr.get_c() {
-                    self.data |= 0x1;
-                }
+                let result = (self.data as u16) << 1 | self.sr.get_c() as u16;
+                self.sr.set_c(result > 0xFF);
+                self.set_zn(result as u8);
+                self.data = result as u8;
                 self.write_data();
             }
             // PLP
@@ -485,8 +477,7 @@ impl<I: Interconnect> CPU<I> {
             0x46 | 0x4A | 0x4E | 0x56 | 0x5E => {
                 self.sr.set_c((self.data & 0x01) == 0x01);
                 self.data >>= 1;
-                self.sr.set_z(self.data == 0);
-                self.sr.set_n(false);
+                self.set_zn(self.data);
                 self.write_data();
             }
             // PHA
@@ -506,15 +497,13 @@ impl<I: Interconnect> CPU<I> {
             // RTS
             0x60 => self.pc = self.pop16() + 1,
             // ADC
-            0x61 | 0x65 | 0x69 | 0x6D | 0x71 | 0x75 | 0x79 | 0x7D => self.add(),
+            0x61 | 0x65 | 0x69 | 0x6D | 0x71 | 0x75 | 0x79 | 0x7D => self.adc(),
             // ROR
             0x66 | 0x6A | 0x6E | 0x76 | 0x7E => {
+                let result = (self.sr.get_c() as u16) << 7 | (self.data as u16) >> 1;
                 self.sr.set_c((self.data & 0x01) == 0x01);
-                self.data = (self.sr.get_c() as u8) << 7 | self.data >> 1;
-                if self.sr.get_c() {
-                    self.data |= 0x80;
-                }
-                self.set_zn(self.data);
+                self.set_zn(result as u8);
+                self.data = result as u8;
                 self.write_data();
             }
             // PLA
@@ -616,6 +605,7 @@ impl<I: Interconnect> CPU<I> {
             }
             // BNE
             0xD0 => self.branch(!self.sr.get_z())?,
+            // CLD
             0xD8 => self.sr.set_d(false),
             // CPX
             0xE0 | 0xE4 | 0xEC => {
@@ -623,7 +613,7 @@ impl<I: Interconnect> CPU<I> {
                 self.set_zn(self.x.wrapping_sub(self.data));
             }
             // SBC
-            0xE1 | 0xE5 | 0xE9 | 0xED | 0xF1 | 0xF5 | 0xF9 | 0xFD => self.sub(),
+            0xE1 | 0xE5 | 0xE9 | 0xED | 0xF1 | 0xF5 | 0xF9 | 0xFD => self.sbc(),
             // INC
             0xE6 | 0xEE | 0xF6 | 0xFE => {
                 self.data = self.data.wrapping_add(1);
