@@ -162,9 +162,38 @@ impl<I: Interconnect> CPU<I> {
 
     pub fn dump_state(&self) -> String {
         format!(
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CPUC:{}",
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} Cycles:{}",
             self.a, self.x, self.y, self.sr.0, self.sp, self.cycles
         )
+    }
+
+    pub fn disassembler(&self) -> String {
+        type A = AddressingModes;
+        let argb = self.readb(self.pc + 1);
+        let argw = self.readw(self.pc + 1);
+        if self.instr.mode == A::Implied {
+            format!("{}", self.instr.name)
+        } else {
+            format!(
+                "{} {}",
+                self.instr.name,
+                match self.instr.mode {
+                    A::Absolute => format!("${:X}", argw),
+                    A::AbsoluteX => format!("${:X},X", argw),
+                    A::AbsoluteY => format!("${:X},Y", argw),
+                    A::Accumulator => format!("A"),
+                    A::Immediate => format!("$#{:02X}", argb),
+                    A::IndexedIndirect => format!("(${:02X},X)", argb),
+                    A::Indirect => format!("(${:02X})", argw),
+                    A::IndirectIndexed => format!("(${:02X}),Y", argb),
+                    A::Relative => format!("$#{:02X}", argb),
+                    A::ZeroPage => format!("$#{:02X}", argb),
+                    A::ZeroPageX => format!("$#{:02X},X", argb),
+                    A::ZeroPageY => format!("$#{:02X},Y", argb),
+                    _ => unreachable!(),
+                }
+            )
+        }
     }
 
     fn buggy_read16(&self, addr: u16) -> u16 {
@@ -386,8 +415,6 @@ impl<I: Interconnect> CPU<I> {
         self.set_zn(result as u8);
         self.sr
             .set_v(((*a ^ self.data as u16) & 0x80) != 0 && ((*a ^ result) & 0x80) != 0);
-        // self.sr
-        //     .set_v((!(self.a ^ self.data) & (self.a ^ result as u8) & 0x80) == 0x80);
         self.a = result as u8;
     }
 
