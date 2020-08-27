@@ -156,8 +156,8 @@ impl<I: Interconnect> CPU<I> {
         self.intr_status = None;
     }
 
-    pub fn get_pc(&self) -> &u16 {
-        &self.pc
+    pub fn get_pc(&self) -> u16 {
+        self.pc
     }
 
     pub fn dump_state(&self) -> String {
@@ -172,7 +172,7 @@ impl<I: Interconnect> CPU<I> {
         let argb = self.readb(self.pc + 1);
         let argw = self.readw(self.pc + 1);
         if self.instr.mode == A::Implied {
-            format!("{}", self.instr.name)
+            self.instr.name.to_string()
         } else {
             format!(
                 "{} {}",
@@ -181,10 +181,10 @@ impl<I: Interconnect> CPU<I> {
                     A::Absolute => format!("${:X}", argw),
                     A::AbsoluteX => format!("${:X},X", argw),
                     A::AbsoluteY => format!("${:X},Y", argw),
-                    A::Accumulator => format!("A"),
+                    A::Accumulator => "A".to_string(),
                     A::Immediate => format!("$#{:02X}", argb),
                     A::IndexedIndirect => format!("(${:02X},X)", argb),
-                    A::Indirect => format!("(${:02X})", argw),
+                    A::Indirect => format!("(${:X})", argw),
                     A::IndirectIndexed => format!("(${:02X}),Y", argb),
                     A::Relative => format!("$#{:02X}", argb),
                     A::ZeroPage => format!("$#{:02X}", argb),
@@ -332,8 +332,8 @@ impl<I: Interconnect> CPU<I> {
     }
 
     #[inline(always)]
-    fn is_different_page(&self, orig: u16, upd: u16) -> bool {
-        (orig >> 8) & 0xFF != (upd >> 8) & 0xFF
+    fn is_different_page(&self, orig: u16, new: u16) -> bool {
+        (orig >> 8) & 0xFF != (new >> 8) & 0xFF
     }
 
     #[inline(always)]
@@ -359,27 +359,27 @@ impl<I: Interconnect> CPU<I> {
     }
 
     fn adc(&mut self) {
-        let a = &(self.a as u16);
-        let d = &(self.data as u16);
-        let c = &(self.sr.get_c() as u16);
+        let a = self.a as u16;
+        let d = self.data as u16;
+        let c = self.sr.get_c() as u16;
         let result = if self.sr.get_d() {
-            let mut res = (*a & 0xF).wrapping_add(*d & 0xF).wrapping_add(*c);
+            let mut res = (a & 0xF).wrapping_add(d & 0xF).wrapping_add(c);
             if res > 0x9 {
                 res = res.wrapping_add(0x6);
             }
 
-            res = res.wrapping_add(*a & 0xF0).wrapping_add(*d & 0xF0);
+            res = res.wrapping_add(a & 0xF0).wrapping_add(d & 0xF0);
 
             if (res & 0x1F0) > 0x90 {
                 res = res.wrapping_add(0x60);
             }
 
             self.sr.set_c((res & 0xFF0) > 0xF0);
-            self.sr.set_z((*a).wrapping_add(*d).wrapping_add(*c) == 0);
+            self.sr.set_z((a).wrapping_add(d).wrapping_add(c) == 0);
             self.sr.set_n(res & 0x80 == 0x80);
             res
         } else {
-            let res = (*a).wrapping_add(*d).wrapping_add(*c);
+            let res = (a).wrapping_add(d).wrapping_add(c);
             self.sr.set_c(res > 0xFF);
             self.set_zn(res as u8);
             res
@@ -391,16 +391,16 @@ impl<I: Interconnect> CPU<I> {
     }
 
     fn sbc(&mut self) {
-        let a = &(self.a as u16);
-        let d = &(self.data as u16);
-        let c = &(!self.sr.get_c() as u16);
+        let a = self.a as u16;
+        let d = self.data as u16;
+        let c = !self.sr.get_c() as u16;
         let result = if self.sr.get_d() {
-            let mut res = (*a & 0xF).wrapping_sub(*d & 0xF).wrapping_sub(*c);
+            let mut res = (a & 0xF).wrapping_sub(d & 0xF).wrapping_sub(c);
             if (res & 0x10) != 0 {
                 res = ((res.wrapping_sub(0x6)) & 0xF)
-                    | ((*a & 0xF0).wrapping_sub(*d & 0xF0).wrapping_sub(0x10));
+                    | ((a & 0xF0).wrapping_sub(d & 0xF0).wrapping_sub(0x10));
             } else {
-                res = (res & 0xF) | (*a & 0xF0).wrapping_sub(*d & 0xF0);
+                res = (res & 0xF) | (a & 0xF0).wrapping_sub(d & 0xF0);
             }
 
             if (res & 0x100) != 0 {
@@ -408,13 +408,13 @@ impl<I: Interconnect> CPU<I> {
             }
             res
         } else {
-            (*a).wrapping_sub(*d).wrapping_sub(*c)
+            a.wrapping_sub(d).wrapping_sub(c)
         };
 
         self.sr.set_c(result < 0x100);
         self.set_zn(result as u8);
         self.sr
-            .set_v(((*a ^ self.data as u16) & 0x80) != 0 && ((*a ^ result) & 0x80) != 0);
+            .set_v(((a ^ self.data as u16) & 0x80) != 0 && ((a ^ result) & 0x80) != 0);
         self.a = result as u8;
     }
 
