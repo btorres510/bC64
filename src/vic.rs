@@ -28,3 +28,5 @@ pub struct Vic {
     cr1: ControlRegister1,
     cr2: ControlRegister2,
 }
+
+impl Vic {}
