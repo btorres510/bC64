@@ -46,15 +46,16 @@ fn functional_test() {
         match cpu.step() {
             Ok(()) => (),
             Err(e) => {
-                if *cpu.get_pc() == 0x346C {
+                if cpu.get_pc() == 0x346C {
                     break;
                 } else {
-                    println!("Failure! \n State: {}", cpu.dump_state());
+                    dbg!(cpu.dump_state());
                     assert!(false, "{:?}", e.to_string());
                 }
             }
         }
     }
 
+    dbg!(cpu.dump_state());
     assert!(true);
 }
